@@ -1,14 +1,16 @@
 require('dotenv').config({ quiet: true });
 const express = require('express');
-
 const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
-
+const session = require('express-session');
 const sequelize = require('./config/database');
 require('./models/Task');
+require('./models/User');
+const passport = require('./config/passport');
 const taskRoutes = require('./routes/tasks');
+const authRoutes = require('./routes/auth');
 
 const app = express();
 
@@ -27,7 +29,19 @@ app.use((req, res, next) => {
   next();
 });
 
+// Sessions and Passport
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, sameSite: 'lax', secure: false }
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Routes
 app.use('/api/tasks', taskRoutes);
+app.use('/api/auth', authRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 
