@@ -1,8 +1,11 @@
 const express = require('express');
 const { body } = require('express-validator');
 const Task = require('../models/Task');
+const redis = require('../config/redis');
 const { validate } = require('../middleware/validate');
 const router = express.Router();
+const CACHE_KEY = 'tasks:all';
+const CACHE_TTL_SECONDS = 60;
 
 // Full rules for create: title is required.
 const taskRules = [
@@ -29,8 +32,13 @@ router.get('/health', (req, res) => {
 });
 
 router.get('/', async (req, res, next) => {
-  try { res.json(await Task.findAll({ order: [['createdAt', 'DESC']] })); }
-  catch (err) { next(err); }
+  try {
+    const cached = await redis.get(CACHE_KEY);
+    if (cached) return res.json({ source: 'cache', data: JSON.parse(cached) });
+    const tasks = await Task.findAll({ order: [['createdAt', 'DESC']] });
+    await redis.setEx(CACHE_KEY, CACHE_TTL_SECONDS, JSON.stringify(tasks));
+    res.json({ source: 'database', data: tasks });
+  } catch (err) { next(err); }
 });
 
 router.get('/:id', async (req, res, next) => {
@@ -42,15 +50,20 @@ router.get('/:id', async (req, res, next) => {
 });
 
 router.post('/', taskRules, async (req, res, next) => {
-  try { res.status(201).json(await Task.create(pickTaskFields(req.body))); }
-  catch (err) { next(err); }
+  try {
+    const task = await Task.create(pickTaskFields(req.body));
+    await redis.del(CACHE_KEY);
+    res.status(201).json(task);
+  } catch (err) { next(err); }
 });
 
 router.put('/:id', updateRules, async (req, res, next) => {
   try {
     const task = await Task.findByPk(req.params.id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
-    await task.update(pickTaskFields(req.body)); res.json(task);
+    await task.update(pickTaskFields(req.body));
+    await redis.del(CACHE_KEY);
+    res.json(task);
   } catch (err) { next(err); }
 });
 
@@ -58,6 +71,7 @@ router.delete('/:id', async (req, res, next) => {
   try {
     const deleted = await Task.destroy({ where: { id: req.params.id } });
     if (!deleted) return res.status(404).json({ error: 'Task not found' });
+    await redis.del(CACHE_KEY);
     res.status(204).send();
   } catch (err) { next(err); }
 });

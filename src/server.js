@@ -5,7 +5,10 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 const session = require('express-session');
+const { RedisStore } = require('connect-redis');
+
 const sequelize = require('./config/database');
+const redis = require('./config/redis');
 require('./models/Task');
 require('./models/User');
 const passport = require('./config/passport');
@@ -29,8 +32,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Sessions and Passport
+// Sessions are stored in Redis so they survive restarts and work across processes
 app.use(session({
+  store: new RedisStore({ client: redis, prefix: 'sess:' }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
@@ -43,6 +47,7 @@ app.use(passport.session());
 app.use('/api/tasks', taskRoutes);
 app.use('/api/auth', authRoutes);
 
+// 404 handler
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 
 // Error handler (four parameters)
@@ -51,6 +56,11 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Unexpected server error' });
 });
 
-sequelize.sync().then(() => {
+sequelize.sync().then(async () => {
+  // A Redis outage fails startup: sessions and caching both depend on it.
+  await redis.connect();
   app.listen(process.env.PORT || 3000, () => console.log('API running'));
+}).catch(err => {
+  console.error('Startup failed', err);
+  process.exit(1);
 });
