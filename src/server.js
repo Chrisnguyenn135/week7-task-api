@@ -17,6 +17,12 @@ app.use('/api/tasks', taskRoutes);
 
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 
+// Error handler (four parameters)
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: 'Unexpected server error' });
+});
+
 sequelize.sync().then(() => {
   app.listen(process.env.PORT || 3000, () => console.log('API running'));
 });
